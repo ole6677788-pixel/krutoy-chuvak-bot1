@@ -1,3 +1,5 @@
+import os
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 
 from telegram.ext import (
@@ -22,7 +24,7 @@ from telegram.ext import (
 
 # =========================
 
-TOKEN = ""
+TOKEN = os.getenv("BOT_TOKEN")
 
 ADMIN_ID = 6542085968
 
