@@ -1,4 +1,6 @@
 import os
+import sqlite3
+from datetime import datetime
 from html import escape
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -14,6 +16,7 @@ from telegram.ext import (
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 6542085968
 CHANNEL_ID = -1003076484178
+RATINGS_DB_PATH = os.getenv("RATING_DB_PATH", "ratings.db")
 
 SODA_RATINGS = {
     "soda_fire": ("🔥", "Ахуенная", "7–10"),
@@ -27,6 +30,7 @@ def main_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📨 Предложить шнягу", callback_data="suggest")],
         [InlineKeyboardButton("🥤 Оценить газяву", callback_data="soda_rate")],
+        [InlineKeyboardButton("🗿 Оспорить тирлист", callback_data="soda_dispute")],
         [
             InlineKeyboardButton("📜 Правила", callback_data="rules"),
             InlineKeyboardButton("ℹ️ О боте", callback_data="about"),
@@ -40,6 +44,7 @@ def rating_keyboard():
         [InlineKeyboardButton("🤔 50/50 (попробовать чёто новое, 4–6)", callback_data="soda_mid")],
         [InlineKeyboardButton("🗑️ Хуйня (лишняя трата бабла, 1–3)", callback_data="soda_trash")],
         [InlineKeyboardButton("🗿 Для Васильева (деревня)", callback_data="soda_vasiliev")],
+        [InlineKeyboardButton("👥 Уже оценили", callback_data="soda_ratings_list")],
         [InlineKeyboardButton("⬅️ Назад в меню", callback_data="back")],
     ])
 
@@ -48,6 +53,65 @@ def back_keyboard(callback_data="soda_back_rating"):
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("⬅️ Назад", callback_data=callback_data)
     ]])
+
+
+def init_ratings_db():
+    with sqlite3.connect(RATINGS_DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS soda_ratings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                soda_name TEXT NOT NULL,
+                rating_key TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+
+
+def save_soda_rating(user, context):
+    rating_key = context.user_data.get("soda_rating")
+    soda_name = context.user_data.get("soda_name")
+    if rating_key not in SODA_RATINGS or not soda_name:
+        return
+    display_name = user.full_name or "Анонимный пользователь"
+    if user.username:
+        display_name += f" (@{user.username})"
+    with sqlite3.connect(RATINGS_DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO soda_ratings (soda_name, rating_key, display_name, created_at) VALUES (?, ?, ?, ?)",
+            (soda_name, rating_key, display_name, datetime.now().strftime("%d.%m.%Y %H:%M")),
+        )
+
+
+def get_recent_soda_ratings(limit=20):
+    with sqlite3.connect(RATINGS_DB_PATH) as conn:
+        return conn.execute(
+            "SELECT soda_name, rating_key, display_name, created_at FROM soda_ratings ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+
+async def show_ratings_list(query):
+    rows = get_recent_soda_ratings()
+    if not rows:
+        text = "👥 <b>УЖЕ ОЦЕНИЛИ</b>\\n\\nПока никто не оценил газяву. Будь первым!"
+    else:
+        lines = ["👥 <b>ПОСЛЕДНИЕ ОЦЕНКИ ГАЗЯВЫ</b>", ""]
+        for soda_name, rating_key, display_name, created_at in rows:
+            emoji, title, score = SODA_RATINGS.get(rating_key, ("❔", "Неизвестно", ""))
+            lines.append(
+                f"🥤 <b>{escape(soda_name)}</b>\\n"
+                f"{emoji} {escape(title)} ({escape(score)})\\n"
+                f"👤 {escape(display_name)} · <i>{escape(created_at)}</i>\\n"
+            )
+        text = "\\n".join(lines)
+    await query.edit_message_text(
+        text, parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Назад к оценкам", callback_data="soda_rate")],
+            [InlineKeyboardButton("🏠 В меню", callback_data="back")],
+        ]),
+    )
 
 
 async def show_rating_menu(query, context):
@@ -118,6 +182,19 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "soda_back_rating":
         await show_rating_menu(query, context)
+
+    elif data == "soda_ratings_list":
+        await show_ratings_list(query)
+
+    elif data == "soda_dispute":
+        context.user_data["mode"] = "soda_dispute"
+        await query.edit_message_text(
+            "🗿 <b>ОСПОРИТЬ ТИРЛИСТ</b>\\n\\n"
+            "Не согласен с мнением тирлиста? Напиши, что именно не так и почему.\\n"
+            "Сообщение будет отправлено админу <b>анонимно</b>: имя, username и ID не передаются.",
+            parse_mode="HTML",
+            reply_markup=back_keyboard("back"),
+        )
 
     elif data == "soda_add_photo":
         if context.user_data.get("mode") != "soda_photo_choice":
@@ -191,6 +268,7 @@ async def send_soda_to_admin(query, context):
         return
 
     emoji, title, score = rating
+    save_soda_rating(user, context)
     username = f"@{escape(user.username)}" if user.username else "без username"
     admin_text = (
         "🥤 <b>НОВАЯ ОЦЕНКА ГАЗЯВЫ</b>\n\n"
@@ -224,6 +302,25 @@ async def send_soda_to_admin(query, context):
 async def receive_suggestion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     mode = context.user_data.get("mode")
+
+    if mode == "soda_dispute":
+        if not message.text or not message.text.strip():
+            await message.reply_text("Напиши текстом, с чем именно не согласен.", reply_markup=back_keyboard("back"))
+            return
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=(
+                "🗿 <b>АНОНИМНОЕ ОСПАРИВАНИЕ ТИРЛИСТА</b>\\n\\n"
+                f"{escape(message.text.strip())}"
+            ),
+            parse_mode="HTML",
+        )
+        context.user_data.pop("mode", None)
+        await message.reply_text(
+            "✅ Твоё анонимное мнение отправлено админу. Личность не указана.",
+            reply_markup=main_menu(),
+        )
+        return
 
     if mode == "soda_name":
         if not message.text or not message.text.strip():
@@ -261,6 +358,7 @@ async def receive_suggestion(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 f"👤 <b>Автор:</b> {username}\n"
                 f"🆔 <b>ID:</b> <code>{message.from_user.id}</code>"
             )
+            save_soda_rating(message.from_user, context)
             await context.bot.send_photo(
                 chat_id=ADMIN_ID,
                 photo=message.photo[-1].file_id,
@@ -380,6 +478,7 @@ def main():
             receive_suggestion,
         )
     )
+    init_ratings_db()
     print("🔥 КРУТОЙ ЧУВАК - ПРЕДЛОЖКА ЗАПУЩЕНА!")
     app.run_polling()
 
