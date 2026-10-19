@@ -94,17 +94,17 @@ def get_recent_soda_ratings(limit=20):
 async def show_ratings_list(query):
     rows = get_recent_soda_ratings()
     if not rows:
-        text = "👥 <b>УЖЕ ОЦЕНИЛИ</b>\\n\\nПока никто не оценил газяву. Будь первым!"
+        text = "👥 <b>УЖЕ ОЦЕНИЛИ</b>\n\nПока никто не оценил газяву. Будь первым!"
     else:
         lines = ["👥 <b>ПОСЛЕДНИЕ ОЦЕНКИ ГАЗЯВЫ</b>", ""]
         for soda_name, rating_key, display_name, created_at in rows:
             emoji, title, score = SODA_RATINGS.get(rating_key, ("❔", "Неизвестно", ""))
             lines.append(
-                f"🥤 <b>{escape(soda_name)}</b>\\n"
-                f"{emoji} {escape(title)} ({escape(score)})\\n"
-                f"👤 {escape(display_name)} · <i>{escape(created_at)}</i>\\n"
+                f"🥤 <b>{escape(soda_name)}</b>\n"
+                f"{emoji} {escape(title)} ({escape(score)})\n"
+                f"👤 {escape(display_name)} · <i>{escape(created_at)}</i>\n"
             )
-        text = "\\n".join(lines)
+        text = "\n".join(lines)
     await query.edit_message_text(
         text, parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
@@ -189,8 +189,8 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "soda_dispute":
         context.user_data["mode"] = "soda_dispute"
         await query.edit_message_text(
-            "🗿 <b>ОСПОРИТЬ ТИРЛИСТ</b>\\n\\n"
-            "Не согласен с мнением тирлиста? Напиши, что именно не так и почему.\\n"
+            "🗿 <b>ОСПОРИТЬ ТИРЛИСТ</b>\n\n"
+            "Не согласен с мнением тирлиста? Напиши, что именно не так и почему.\n"
             "Сообщение будет отправлено админу <b>анонимно</b>: имя, username и ID не передаются.",
             parse_mode="HTML",
             reply_markup=back_keyboard("back"),
@@ -310,7 +310,7 @@ async def receive_suggestion(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await context.bot.send_message(
             chat_id=ADMIN_ID,
             text=(
-                "🗿 <b>АНОНИМНОЕ ОСПАРИВАНИЕ ТИРЛИСТА</b>\\n\\n"
+                "🗿 <b>АНОНИМНОЕ ОСПАРИВАНИЕ ТИРЛИСТА</b>\n\n"
                 f"{escape(message.text.strip())}"
             ),
             parse_mode="HTML",
